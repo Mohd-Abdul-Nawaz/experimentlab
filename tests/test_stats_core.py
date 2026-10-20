@@ -198,3 +198,25 @@ def test_demo_srm_shift_changes_split():
     share_t = (df["variant"] == "treatment").mean()
     assert 0.53 < share_t < 0.57
 
+
+# ------------------------------------------------- text-column regression ----
+
+def test_text_metric_raises_helpful_error_not_crash():
+    df = demo_data.conversion_experiment(n_per_arm=500, seed=5)
+    with pytest.raises(ValueError, match="not 0/1"):
+        sc.frequentist_test(df, "variant", "device", "control", "treatment",
+                            metric_type="conversion")
+    with pytest.raises(ValueError, match="numeric"):
+        sc.frequentist_test(df, "variant", "device", "control", "treatment",
+                            metric_type="continuous", method="t")
+
+
+def test_binary_and_float_helpers():
+    df = demo_data.conversion_experiment(n_per_arm=200, seed=5)
+    assert sc._is_binary(df["converted"])
+    assert not sc._is_binary(df["device"])
+    num = sc._to_float(df["converted"], "x")
+    assert num.sum() == df["converted"].sum()
+    with pytest.raises(ValueError, match="looks like text"):
+        sc._to_float(df["device"], "x")
+

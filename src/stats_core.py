@@ -99,6 +99,23 @@ class TestResult:
     extras: dict = field(default_factory=dict)
 
 
+def _to_float(s: pd.Series, what: str) -> pd.Series:
+    """Coerce a metric/covariate column to float, raising a UI-friendly error."""
+    num = pd.to_numeric(s, errors="coerce")
+    if num.isna().all():
+        raise ValueError(
+            f"'{s.name}' looks like text — pick a numeric column for {what}."
+        )
+    return num
+
+
+def _is_binary(s: pd.Series) -> bool:
+    """True if the column holds only 0/1 values (per-row, not per-group)."""
+    num = pd.to_numeric(s, errors="coerce")
+    vals = num.dropna()
+    return bool(len(vals) > 0 and ((vals == 0) | (vals == 1)).all())
+
+
 def _z_test_proportions(
     x_a: int, n_a: int, x_b: int, n_b: int, alpha: float, alternative: Alt
 ) -> TestResult:
@@ -218,15 +235,22 @@ def frequentist_test(
     b = sub[sub[variant_col] == treatment][value_col]
 
     if metric_type == "conversion":
-        x_a, n_a = int(a.sum()), len(a)
-        x_b, n_b = int(b.sum()), len(b)
+        if not _is_binary(a) or not _is_binary(b):
+            raise ValueError(
+                f"'{value_col}' is not 0/1 — for conversion metrics pick a "
+                "binary column (or switch Metric type to 'continuous')."
+            )
+        an, bn = _to_float(a, "conversion metrics"), _to_float(b, "conversion metrics")
+        x_a, n_a = int(an.sum()), int(an.notna().sum())
+        x_b, n_b = int(bn.sum()), int(bn.notna().sum())
         if min(x_a, x_b, n_a - x_a, n_b - x_b) < 5:
             raise ValueError(
                 "Cell counts < 5: consider Fisher's exact test instead."
             )
         return _z_test_proportions(x_a, n_a, x_b, n_b, alpha, alternative)
 
-    av, bv = a.to_numpy(dtype=float), b.to_numpy(dtype=float)
+    av = _to_float(a, "continuous metrics").dropna().to_numpy(dtype=float)
+    bv = _to_float(b, "continuous metrics").dropna().to_numpy(dtype=float)
     if method == "t":
         return _welch_t_test(av, bv, alpha, alternative)
     if method == "mw":

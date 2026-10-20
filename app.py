@@ -69,6 +69,23 @@ tab_power, tab_srm, tab_freq, tab_bayes, tab_cuped = st.tabs(
      "🎲 Bayesian test", "✂️ CUPED"]
 )
 
+
+def _default_col(cols: list[str], *cands: str, fallback: int = 0) -> int:
+    """Index of first candidate present in cols — for smart selectbox defaults."""
+    for c in cands:
+        if c in cols:
+            return cols.index(c)
+    return min(fallback, len(cols) - 1)
+
+
+def _numeric_cols(df: pd.DataFrame) -> list[str]:
+    return [c for c in df.columns
+            if pd.api.types.is_numeric_dtype(df[c])]
+
+
+def _binary_cols(df: pd.DataFrame) -> list[str]:
+    return [c for c in df.columns if sc._is_binary(df[c])]
+
 # ---------------------------------------------------------------- power ----
 with tab_power:
     st.subheader("Sample size & power for a conversion metric")
@@ -136,15 +153,22 @@ with tab_srm:
 with tab_freq:
     st.subheader("Frequentist variant comparison")
     cols = df.columns.tolist()
+    num = _numeric_cols(df) or cols
     c1, c2, c3 = st.columns(3)
-    variant_col = c1.selectbox("Variant column", cols, key="f_variant")
-    value_col = c2.selectbox("Metric column", cols, key="f_value")
+    variant_col = c1.selectbox("Variant column", cols,
+                               index=_default_col(cols, "variant", "group",
+                                                  "arm"),
+                               key="f_variant")
+    value_col = c2.selectbox("Metric column", num,
+                             index=_default_col(num, "converted", "revenue",
+                                                "metric"),
+                             key="f_value")
     variants = sorted(df[variant_col].dropna().unique().tolist())
     if len(variants) < 2:
         st.warning("Need at least two variants.")
         st.stop()
     control = c3.selectbox("Control", variants, key="f_ctrl")
-    treatment = c2.selectbox("Treatment",
+    treatment = c3.selectbox("Treatment",
                              [v for v in variants if v != control], key="f_treat")
 
     metric_type = st.radio("Metric type", ["conversion", "continuous"],
@@ -207,11 +231,21 @@ with tab_bayes:
     )
     cols = df.columns.tolist()
     c1, c2, c3 = st.columns(3)
-    variant_col = c1.selectbox("Variant column", cols, key="b_variant")
-    value_col = c2.selectbox("Converted column (0/1)", cols, key="b_value")
+    variant_col = c1.selectbox("Variant column", cols,
+                               index=_default_col(cols, "variant", "group",
+                                                  "arm"),
+                               key="b_variant")
+    binary = _binary_cols(df)
+    if not binary:
+        st.error("No binary (0/1) column found — the Bayesian tab needs a "
+                 "converted-style column. Try the Conversion demo dataset.")
+        st.stop()
+    value_col = c2.selectbox("Converted column (0/1)", binary,
+                             index=_default_col(binary, "converted"),
+                             key="b_value")
     variants = sorted(df[variant_col].dropna().unique().tolist())
     control = c3.selectbox("Control", variants, key="b_ctrl")
-    treatment = c2.selectbox("Treatment",
+    treatment = c3.selectbox("Treatment",
                              [v for v in variants if v != control], key="b_treat")
     ci = st.slider("Credible interval", 0.80, 0.99, 0.95, 0.01)
 
@@ -258,11 +292,25 @@ with tab_cuped:
         "θ = Cov(y, x)/Var(x). Lower variance ⇒ narrower CIs ⇒ shorter tests."
     )
     cols = df.columns.tolist()
+    num = _numeric_cols(df)
     c1, c2, c3 = st.columns(3)
-    variant_col = c1.selectbox("Variant column", cols, key="c_variant")
-    value_col = c2.selectbox("In-experiment metric", cols, key="c_value")
-    covariate_col = c3.selectbox("Pre-period covariate",
-                                 [c for c in cols if c != value_col], key="c_cov")
+    variant_col = c1.selectbox("Variant column", cols,
+                               index=_default_col(cols, "variant", "group",
+                                                  "arm"),
+                               key="c_variant")
+    if not num:
+        st.error("No numeric columns found — CUPED needs numeric metric and "
+                 "covariate columns.")
+        st.stop()
+    value_col = c2.selectbox("In-experiment metric", num,
+                             index=_default_col(num, "metric", "revenue",
+                                                "converted"),
+                             key="c_value")
+    cov_opts = [c for c in num if c != value_col] or num
+    covariate_col = c3.selectbox("Pre-period covariate", cov_opts,
+                                 index=_default_col(cov_opts, "pre_metric",
+                                                    "pre", "baseline"),
+                                 key="c_cov")
     variants = sorted(df[variant_col].dropna().unique().tolist())
     control = c1.selectbox("Control", variants, key="c_ctrl")
     treatment = c2.selectbox("Treatment",
